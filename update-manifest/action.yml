@@ -1,0 +1,37 @@
+name: update-manifest
+description: Atualiza a imagem no YAML com yq e faz commit
+inputs:
+  file:           { description: 'Path to the Kubernetes manifest file', required: true, default: k8s/20-deployment-service.yaml }
+  deploy_name:    { description: 'Name of the Kubernetes deployment', required: true, default: customer-api }
+  container_name: { description: 'Name of the container to update', required: true, default: customer-api }
+  image_tag:      { description: 'New image tag to deploy', required: true }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL -o "$HOME/.local/bin/yq" https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+        chmod +x "$HOME/.local/bin/yq"
+        export IMG="${{ inputs.image_tag }}"
+        "$HOME/.local/bin/yq" -i '
+          (. | select(.kind=="Deployment" and .metadata.name=="'${{ inputs.deploy_name }}'")
+            .spec.template.spec.containers[]
+            | select(.name=="'${{ inputs.container_name }}'")).image = env(IMG)
+        ' "${{ inputs.file }}"
+        NEW=$("$HOME/.local/bin/yq" '
+          (. | select(.kind=="Deployment" and .metadata.name=="'${{ inputs.deploy_name }}'")
+            .spec.template.spec.containers[]
+            | select(.name=="'${{ inputs.container_name }}'")).image
+        ' "${{ inputs.file }}")
+        test -n "$NEW"
+    - shell: bash
+      run: |
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add "${{ inputs.file }}"
+        git commit -m "deploy: update image -> ${{ inputs.image_tag }} [skip ci]" || true
+        git fetch origin master
+        git pull --rebase origin master
+        git push
