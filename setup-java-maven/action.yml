@@ -1,0 +1,27 @@
+name: setup-java-maven
+description: Java+Maven com cache do ~/.m2
+inputs:
+  java_version:
+    description: 'Java version to set up'
+    required: true
+    default: "21"
+  maven_version:
+    description: 'Maven version to set up'
+    required: true
+    default: "3.9.9"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java_version }}
+        cache: maven
+    - uses: actions/cache@v4
+      with:
+        path: ~/.m2/repository
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: ${{ runner.os }}-m2-
+    - uses: stCarolas/setup-maven@v5
+      with:
+        maven-version: ${{ inputs.maven_version }}
