@@ -1,9 +1,9 @@
 
 name: export-image-base
-description: Valida e exporta o nome base da imagem Docker (ex.: user/repo) a partir de DOCKER_IMAGE
+description: Valida e exporta o nome base da imagem Docker 
 inputs:
   docker_image:
-    description: Nome base da imagem (ex.: user/repo). Se vazio, usa a env DOCKER_IMAGE herdada.
+    description: Nome base da imagem 
     required: false
 outputs:
   image:
