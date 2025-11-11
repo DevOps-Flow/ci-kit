@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 env:
   DOCKER_IMAGE: ${{ inputs.docker_image || vars.DOCKER_IMAGE }}
