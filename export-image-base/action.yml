@@ -1,0 +1,41 @@
+
+name: export-image-base
+description: Valida e exporta o nome base da imagem Docker (ex.: user/repo) a partir de DOCKER_IMAGE
+inputs:
+  docker_image:
+    description: Nome base da imagem (ex.: user/repo). Se vazio, usa a env DOCKER_IMAGE herdada.
+    required: false
+outputs:
+  image:
+    description: Nome base validado da imagem
+    value: ${{ steps.out.outputs.IMAGE }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Prioriza input; se vazio, tenta variável de ambiente herdada
+        IMAGE_IN="${{ inputs.docker_image }}"
+        if [ -z "${IMAGE_IN:-}" ] || [ "${IMAGE_IN}" = "null" ]; then
+          IMAGE_IN="${DOCKER_IMAGE:-}"
+        fi
+
+        if [ -z "${IMAGE_IN:-}" ]; then
+          echo "ERRO: Nenhum nome de imagem fornecido. Defina input 'docker_image' ou a env DOCKER_IMAGE (ex.: user/repo)."
+          exit 1
+        fi
+
+        # Validação simples do formato user/repo (minúsculas, dígitos, ., _, -)
+        if ! echo "$IMAGE_IN" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+          echo "ERRO: Nome de imagem inválido: '$IMAGE_IN'. Use 'usuario/repo' (minúsculas, dígitos, '.', '_', '-')."
+          exit 1
+        fi
+
+        echo "IMAGE=${IMAGE_IN}" >> "$GITHUB_OUTPUT"
+
+    - id: out
+      shell: bash
+      run: echo "IMAGE=${{ steps.run.outputs.IMAGE }}" >> "$GITHUB_OUTPUT"

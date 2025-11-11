@@ -3,13 +3,14 @@ name: quarkus-native
 on:
   workflow_call:
     inputs:
-      docker_image:        { type: string, required: false } # override opcional (ex: user/repo)
-      dockerfile:          { type: string, required: false, default: ./Dockerfile.native }
-      k8s_file:            { type: string, required: false, default: k8s/20-deployment-service.yaml }
-      k8s_deploy_name:     { type: string, required: false, default: customer-api }
-      k8s_container:       { type: string, required: false, default: customer-api }
-      java_version:        { type: string, required: false, default: '21' }
-      maven_version:       { type: string, required: false, default: '3.9.9' }
+      runner_label:    { type: string, required: false, default: 'ubuntu-latest' }
+      docker_image:    { type: string, required: false }   # override opcional; senão usa vars.DOCKER_IMAGE do caller
+      dockerfile:      { type: string, required: false, default: ./Dockerfile.native }
+      k8s_file:        { type: string, required: false, default: k8s/20-deployment-service.yaml }
+      k8s_deploy_name: { type: string, required: false, default: customer-api }
+      k8s_container:   { type: string, required: false, default: customer-api }
+      java_version:    { type: string, required: false, default: '21' }
+      maven_version:   { type: string, required: false, default: '3.9.9' }
     secrets:
       DOCKERHUB_USERNAME:  { required: true }
       DOCKERHUB_TOKEN:     { required: true }
@@ -21,33 +22,36 @@ permissions:
   contents: write
 
 env:
+  # Prioriza input; se vazio, usa a repo variable DOCKER_IMAGE do repositório chamador
   DOCKER_IMAGE: ${{ inputs.docker_image || vars.DOCKER_IMAGE }}
 
 jobs:
   meta:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_label }}
     outputs:
       VERSION: ${{ steps.ver.outputs.VERSION }}
       IMAGE:   ${{ steps.img.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: DevOps-Flow/ci-kit/setup-java-maven@v1
         with:
           java_version:  ${{ inputs.java_version }}
           maven_version: ${{ inputs.maven_version }}
 
-      - id: ver
-        run: echo "VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)" >> "$GITHUB_OUTPUT"
+      - name: Extract project version
+        id: ver
+        run: |
+          echo "VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)" >> "$GITHUB_OUTPUT"
 
-      - id: img
-        uses: DevOps-Flow/ci-kit/resolve-image@v1
+      - name: Resolve image base (from DOCKER_IMAGE)
+        id: img
+        uses: DevOps-Flow/ci-kit/export-image-base@v1.0.3
         with:
-          docker_image:  ${{ env.DOCKER_IMAGE }}
-          dockerhub_user: ${{ secrets.DOCKERHUB_USERNAME }}
-          repo_name:     ${{ github.event.repository.name }}
+          docker_image: ${{ env.DOCKER_IMAGE }}
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_label }}
     needs: [meta]
     steps:
       - uses: actions/checkout@v4
@@ -55,15 +59,31 @@ jobs:
         with:
           java_version:  ${{ inputs.java_version }}
           maven_version: ${{ inputs.maven_version }}
-      - uses: DevOps-Flow/ci-kit/build-native@v1
+      - name: Build Quarkus Native (container-build)
+        run: mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-runner
+          path: target/*-runner
+          if-no-files-found: error
 
   image:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_label }}
     needs: [build, meta]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: { name: native-runner, path: target }
+        with:
+          name: native-runner
+          path: target
+
+      - name: Sanity • IMAGE/VERSION
+        run: |
+          echo "IMAGE=${{ needs.meta.outputs.IMAGE }}"
+          echo "VERSION=${{ needs.meta.outputs.VERSION }}"
+          test -n "${{ needs.meta.outputs.IMAGE }}"   || (echo "IMAGE vazio" && exit 1)
+          test -n "${{ needs.meta.outputs.VERSION }}" || (echo "VERSION vazia" && exit 1)
+
       - uses: DevOps-Flow/ci-kit/docker-build-push@v1
         with:
           image:          ${{ needs.meta.outputs.IMAGE }}
@@ -74,20 +94,24 @@ jobs:
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 
   update:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_label }}
     needs: [image, meta]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
+      - name: Compose full image tag
+        id: tag
+        run: echo "FULL=${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}" >> "$GITHUB_OUTPUT"
+
       - uses: DevOps-Flow/ci-kit/update-manifest@v1
         with:
           file:           ${{ inputs.k8s_file }}
           deploy_name:    ${{ inputs.k8s_deploy_name }}
           container_name: ${{ inputs.k8s_container }}
-          image_tag:      ${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}
+          image_tag:      ${{ steps.tag.outputs.FULL }}
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_label }}
     needs: [update]
     steps:
       - uses: DevOps-Flow/ci-kit/argocd-deploy@v1
