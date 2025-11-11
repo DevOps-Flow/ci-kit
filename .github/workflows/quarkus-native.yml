@@ -46,7 +46,7 @@ jobs:
 
       - name: Resolve image base (from DOCKER_IMAGE)
         id: img
-        uses: DevOps-Flow/ci-kit/export-image-base@v1.0.3
+        uses: DevOps-Flow/ci-kit/export-image-base@v1.0.4
         with:
           docker_image: ${{ env.DOCKER_IMAGE }}
 
