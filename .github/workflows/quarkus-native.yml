@@ -1,0 +1,98 @@
+name: quarkus-native
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:        { type: string, required: false } # override opcional (ex: user/repo)
+      dockerfile:          { type: string, required: false, default: ./Dockerfile.native }
+      k8s_file:            { type: string, required: false, default: k8s/20-deployment-service.yaml }
+      k8s_deploy_name:     { type: string, required: false, default: customer-api }
+      k8s_container:       { type: string, required: false, default: customer-api }
+      java_version:        { type: string, required: false, default: '21' }
+      maven_version:       { type: string, required: false, default: '3.9.9' }
+    secrets:
+      DOCKERHUB_USERNAME:  { required: true }
+      DOCKERHUB_TOKEN:     { required: true }
+      ARGOCD_SERVER:       { required: true }
+      ARGOCD_TOKEN:        { required: true }
+      ARGOCD_APP:          { required: true }
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOCKER_IMAGE: ${{ inputs.docker_image || vars.DOCKER_IMAGE }}
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.ver.outputs.VERSION }}
+      IMAGE:   ${{ steps.img.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DevOps-Flow/ci-kit/setup-java-maven@v1
+        with:
+          java_version:  ${{ inputs.java_version }}
+          maven_version: ${{ inputs.maven_version }}
+
+      - id: ver
+        run: echo "VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)" >> "$GITHUB_OUTPUT"
+
+      - id: img
+        uses: DevOps-Flow/ci-kit/resolve-image@v1
+        with:
+          docker_image:  ${{ env.DOCKER_IMAGE }}
+          dockerhub_user: ${{ secrets.DOCKERHUB_USERNAME }}
+          repo_name:     ${{ github.event.repository.name }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [meta]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DevOps-Flow/ci-kit/setup-java-maven@v1
+        with:
+          java_version:  ${{ inputs.java_version }}
+          maven_version: ${{ inputs.maven_version }}
+      - uses: DevOps-Flow/ci-kit/build-native@v1
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [build, meta]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: native-runner, path: target }
+      - uses: DevOps-Flow/ci-kit/docker-build-push@v1
+        with:
+          image:          ${{ needs.meta.outputs.IMAGE }}
+          version:        ${{ needs.meta.outputs.VERSION }}
+          dockerfile:     ${{ inputs.dockerfile }}
+          context:        .
+          dockerhub_user: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  update:
+    runs-on: ubuntu-latest
+    needs: [image, meta]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DevOps-Flow/ci-kit/update-manifest@v1
+        with:
+          file:           ${{ inputs.k8s_file }}
+          deploy_name:    ${{ inputs.k8s_deploy_name }}
+          container_name: ${{ inputs.k8s_container }}
+          image_tag:      ${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [update]
+    steps:
+      - uses: DevOps-Flow/ci-kit/argocd-deploy@v1
+        with:
+          server: ${{ secrets.ARGOCD_SERVER }}
+          token:  ${{ secrets.ARGOCD_TOKEN }}
+          app:    ${{ secrets.ARGOCD_APP }}
