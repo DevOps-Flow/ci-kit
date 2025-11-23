@@ -46,7 +46,7 @@ jobs:
 
       - name: Resolve image base (from DOCKER_IMAGE)
         id: img
-        uses: DevOps-Flow/ci-kit/export-image-base@v1.0.3
+        uses: DevOps-Flow/ci-kit/export-image-base@v1.0.4
         with:
           docker_image: ${{ env.DOCKER_IMAGE }}
 
@@ -96,7 +96,6 @@ jobs:
   update:
     runs-on: ${{ inputs.runner_label }}
     needs: [image, meta]
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
       - name: Compose full image tag
