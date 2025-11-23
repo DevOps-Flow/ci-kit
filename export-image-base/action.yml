@@ -3,7 +3,7 @@ name: export-image-base
 description: Valida e exporta o nome base da imagem Docker 
 inputs:
   docker_image:
-    description: Nome base da imagem 
+    description: Nome base da imagem
     required: false
 outputs:
   image:
